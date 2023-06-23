@@ -1,0 +1,264 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "authorship_tag": "ABX9TyPFAIPdAYJ14xV1zG16ZWQR",
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/abhinav9629/JPEGUP/blob/main/Jpeg2SRJpeg\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 48,
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "jNuTgLpi_-FF",
+        "outputId": "0536f998-f8ef-47b9-a9b5-e9cb4d55e96d"
+      },
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Drive already mounted at /content/drive; to attempt to forcibly remount, call drive.mount(\"/content/drive\", force_remount=True).\n"
+          ]
+        }
+      ],
+      "source": [
+        "from google.colab import drive\n",
+        "drive.mount('/content/drive')"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import os\n",
+        "import torch\n",
+        "import torch.nn as nn\n",
+        "from torch.utils.data import DataLoader"
+      ],
+      "metadata": {
+        "id": "iI4x6mN2Iny7"
+      },
+      "execution_count": 49,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "class C_Block(nn.Module):\n",
+        "  def __init__(self, in_ch, out_ch, kernel_size, stride, padding, disc = False, use_activation = True, use_batchnorm = True ):\n",
+        "     super().__init__()\n",
+        "     self.convnet = nn.Conv2d(in_ch, out_ch, kernel_size = kernel_size, stride = stride, padding = padding, bias = not use_batchnorm)\n",
+        "     self.bn = nn.BatchNorm2d(out_ch) if use_batchnorm else nn.Identity()\n",
+        "     self.act = nn.LeakyReLU(0.2, inplace= True) if disc else nn.PReLU(num_parameters = out_ch)\n",
+        "     self.use_activation = use_activation\n",
+        "\n",
+        "  def forward(self, input):\n",
+        "    x = self.convnet(input)\n",
+        "    x = self.bn(x)\n",
+        "    return self.act(x) if self.use_activation else x"
+      ],
+      "metadata": {
+        "id": "d29zNaRiJvY4"
+      },
+      "execution_count": 50,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [],
+      "metadata": {
+        "id": "Pfg2Xe5TD_ef"
+      },
+      "execution_count": 50,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "class US_Block(nn.Module):\n",
+        "  def __init__(self, in_ch, scale):\n",
+        "    super().__init__()\n",
+        "    self.convnet = nn.Conv2d(in_ch, in_ch*scale**2, kernel_size = 3, stride = 1, padding=1)\n",
+        "    self.ps = nn.PixelShuffle(scale)\n",
+        "    self.act = nn.PReLU(num_parameters = in_ch)\n",
+        "\n",
+        "  def forward(self, input):\n",
+        "    x = self.convnet(input)\n",
+        "    x = self.ps(x)\n",
+        "    return self.act(x)"
+      ],
+      "metadata": {
+        "id": "jinoT4VODdYy"
+      },
+      "execution_count": 51,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "class ResidualNet_Block(nn.Module):\n",
+        "  def __init__(self, in_ch):\n",
+        "    super().__init__()\n",
+        "    self.block1 = C_Block(in_ch, in_ch, kernel_size = 3, stride = 1, padding = 1 )\n",
+        "    self.block2 = C_Block(in_ch, in_ch, kernel_size = 3, stride = 1, padding = 1, use_activation = False)\n",
+        "\n",
+        "  def forward(self, input):\n",
+        "    x = self.block1(input)\n",
+        "    out = self.block2(x)\n",
+        "    return out + input"
+      ],
+      "metadata": {
+        "id": "PJNGCAf2XCjd"
+      },
+      "execution_count": 52,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "class Generator(nn.Module):\n",
+        "  def __init__(self, in_ch = 3, num_ch = 64, num_blocks = 16):\n",
+        "    super().__init__()\n",
+        "    self.init_convnet = C_Block(in_ch, num_ch, kernel_size = 9, stride = 1, padding = 4, use_batchnorm=False)\n",
+        "    self.residual = nn.Sequential(\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "        ResidualNet_Block(num_ch),\n",
+        "    )\n",
+        "    self.convnet = C_Block(num_ch, num_ch, kernel_size = 3, stride = 1, padding = 1, use_activation = False)\n",
+        "    self.upsamples = nn.Sequential(\n",
+        "        US_Block(num_ch,scale = 2),\n",
+        "        US_Block(num_ch,scale = 2),\n",
+        "    )\n",
+        "    self.final_convnet = nn.Conv2d(num_ch, in_ch, kernel_size = 9, stride = 1, padding = 4)\n",
+        "\n",
+        "  def forward(self, input):\n",
+        "    initial = self.init_convnet(input)\n",
+        "    x = self.residual(initial)\n",
+        "    x = self.convnet(x) + initial\n",
+        "    x = self.upsamples(x)\n",
+        "    out = self.final_convnet(x)\n",
+        "    return torch.tanh(out)\n"
+      ],
+      "metadata": {
+        "id": "VAjbca6ufaru"
+      },
+      "execution_count": 53,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "class Discriminator(nn.Module):\n",
+        "  def __init__(self, in_ch = 3, features = 64):\n",
+        "    super().__init__()\n",
+        "    self.convnet = nn.Sequential(\n",
+        "        C_Block(in_ch, features, kernel_size = 3, stride = 1, padding = 1, disc = True, use_activation = True, use_batchnorm = False ),\n",
+        "        C_Block(features, features, kernel_size = 3, stride = 2, padding = 1, disc = True, use_activation = True, use_batchnorm = True ),\n",
+        "        C_Block(features, features*2, kernel_size = 3, stride = 1, padding = 1, disc = True, use_activation = True, use_batchnorm = True ),\n",
+        "        C_Block(features*2, features*2, kernel_size = 3, stride = 2, padding = 1, disc = True, use_activation = True, use_batchnorm = True ),\n",
+        "        C_Block(features*2, features*4, kernel_size = 3, stride = 1, padding = 1, disc = True, use_activation = True, use_batchnorm = True ),\n",
+        "        C_Block(features*4, features*4, kernel_size = 3, stride = 2, padding = 1, disc = True, use_activation = True, use_batchnorm = True ),\n",
+        "        C_Block(features*4, features*8, kernel_size = 3, stride = 1, padding = 1, disc = True, use_activation = True, use_batchnorm = True ),\n",
+        "        C_Block(features*8, features*8, kernel_size = 3, stride = 2, padding = 1, disc = True, use_activation = True, use_batchnorm = True ),\n",
+        "    )\n",
+        "    self.dense = nn.Sequential(\n",
+        "        nn.AdaptiveAvgPool2d((6,6)),\n",
+        "        nn.Flatten(),\n",
+        "        nn.Linear(512*6*6, 1024),\n",
+        "        nn.LeakyReLU(0.2, inplace=True),\n",
+        "        nn.Linear(1024,1),\n",
+        "    )\n",
+        "\n",
+        "  def forward(self, input):\n",
+        "    x = self.convnet(input)\n",
+        "    out = self.dense(x)\n",
+        "    return out"
+      ],
+      "metadata": {
+        "id": "PgaTePX4vYB2"
+      },
+      "execution_count": 54,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "def test():\n",
+        "  low_res = 24\n",
+        "  with torch.cuda.amp.autocast():\n",
+        "    x = torch.randn((5, 3, low_res,low_res))\n",
+        "    gen = Generator()\n",
+        "    disc = Discriminator()\n",
+        "    gen_out = gen(x)\n",
+        "    disc_out = disc(gen_out)\n",
+        "    print(gen_out.shape)\n",
+        "    print(disc_out.shape)\n",
+        "test()"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "SRjvnp6d0oCo",
+        "outputId": "24339996-95f3-4d82-aa0a-37401010ded7"
+      },
+      "execution_count": 55,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "torch.Size([5, 3, 96, 96])\n",
+            "torch.Size([5, 1])\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [],
+      "metadata": {
+        "id": "ey2vvNDw1yHd"
+      },
+      "execution_count": 55,
+      "outputs": []
+    }
+  ]
+}
